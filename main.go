@@ -14,6 +14,7 @@ import (
 type SpanState struct {
 	Env string
 	Service string
+	Resource string
 	Operation string
 	StartMillis time.Time
 	SpanID uint64
@@ -25,13 +26,14 @@ func main() {
 	actionPtr := flag.String("action", "", "'start' or 'finish'")
 	envPtr := flag.String("env", "", "The env name visible for the span")
 	servicePtr := flag.String("service", "", "The service name visible for the span")
+	resourcePtr := flag.String("resource", "", "The resource name visible for the span")
 	operationPtr := flag.String("operation", "", "The operation name visible for the span")
 	currentSpanStatePtr := flag.String("state", "", "The file path to store/retrieve the started span state")
 	parentSpanStatePtr := flag.String("parent", "", "The file path to store/retrieve the parent span state")
 	flag.Parse()
 
 	if string(*actionPtr) == "start" {
-		start(string(*envPtr), string(*servicePtr), string(*operationPtr), string(*currentSpanStatePtr), string(*parentSpanStatePtr))
+		start(string(*envPtr), string(*servicePtr), string(*resourcePtr), string(*operationPtr), string(*currentSpanStatePtr), string(*parentSpanStatePtr))
 	} else if string(*actionPtr) == "finish" {
 		finish(string(*currentSpanStatePtr))
 	} else {
@@ -40,7 +42,7 @@ func main() {
 
 }
 
-func start(env string, service string, operation string, currentStateFilePath string, parentStateFilePath string) {
+func start(env string, service string, resource string, operation string, currentStateFilePath string, parentStateFilePath string) {
 	tracer.Start(tracer.WithServiceName(service))
 
 	//dont love this but should be ok
@@ -53,6 +55,7 @@ func start(env string, service string, operation string, currentStateFilePath st
 		span = tracer.StartSpan(
 			operation,
 			tracer.WithSpanID(spanID),
+			tracer.ResourceName(resource),
 			tracer.Tag("Env", env),
 			tracer.StartTime(time.Now()))
 	} else {
@@ -80,6 +83,7 @@ func start(env string, service string, operation string, currentStateFilePath st
 			operation,
 			tracer.ChildOf(parentSpanContext),
 			tracer.WithSpanID(spanID),
+			tracer.ResourceName(resource),
 			tracer.Tag("Env", env),
 			tracer.StartTime(time.Now()))
 	}
@@ -91,7 +95,7 @@ func start(env string, service string, operation string, currentStateFilePath st
 		fmt.Println(err.Error())
 		return
 	}
-	contextJson, err := json.Marshal(&SpanState{env, service, operation, time.Now(), spanID, carrier, parentSpanContextCarrier})
+	contextJson, err := json.Marshal(&SpanState{env, service, resource, operation, time.Now(), spanID, carrier, parentSpanContextCarrier})
 	if err != nil {
 		fmt.Println(err.Error())
 		return
@@ -127,6 +131,7 @@ func finish(currentStateFilePath string) {
 		span = tracer.StartSpan(
 			currentSpanState.Operation,
 			tracer.WithSpanID(currentSpanState.SpanID),
+			tracer.ResourceName(currentSpanState.Resource),
 			tracer.Tag("Env", currentSpanState.Env),
 			tracer.StartTime(currentSpanState.StartMillis))
 
@@ -143,6 +148,7 @@ func finish(currentStateFilePath string) {
 			currentSpanState.Operation,
 			tracer.ChildOf(parentSpanContext),
 			tracer.WithSpanID(currentSpanState.SpanID),
+			tracer.ResourceName(currentSpanState.Resource),
 			tracer.Tag("Env", currentSpanState.Env),
 			tracer.StartTime(currentSpanState.StartMillis))
 		fmt.Printf("Finished span with id: %s parent: %s", span.Context().SpanID(), parentSpanContext.SpanID())
