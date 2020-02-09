@@ -1,0 +1,13 @@
+language: go
+go:
+- 1.13.x
+script:
+- make
+deploy:
+  provider: releases
+  skip_cleanup: true
+  api_key:
+    secure: wy9b9J1i+DerwccvG5F4ZWor2jvpyqBRqs+5kmgE8ECSxC67X3ijgHHt0q+b3R1JsEm+vxgAopWCiW0ezgel7QzZ4N+cmcKUTMOJ2t1lu+shNSCYMeWVYH2pEO9NaqRQZME2/2RCb1sOY6bjXkFAe4vzIP38pAa2Lnr6iMIBkvcN/pPZ8+rpApByTsckR62ojtbYvAVr+r9O3uo08Cp1exfEjFmJHU1CRGXjlAMi4gaO1m2X17jjREHTl+rgYKd73yAlaNXVYabL3G3cB7D3Hs/euxkWiSXVY0BGuZDnsmtjqPT80mfJGtVQG3oSrSOWdoKldN7GAFNcaGRrgalBE9WW0shRjsVAL2erwOJw7tSxn75UaCv6ae6eeZCJ77GmDHolSkdLFjK4x+2jPpdX8bqe2enshnoTeoB7lO1ur0SbYIjqhnwy32cqXftKUnquR0Vqsmi1Fkkh9/A7T6OosMvxew0W7S0iWBcnLYnkQIrODNfmEMgFvisCWBPkKeSv2AtlY0mBjo6pN1VIV+zAZh+m++Y+nbmiisTtcCmkGkxw+DYCC+rPs81JBV8OjPXL1vGjvhH0Xb+meqPKr4FKtOwbzdYd8XfG02U4qYOxT3kl5rWCEPAFVDpz04wfYXkzmYhDh/6iewBWpV/3u4gR/26jFNbDVrovUbV2BU4VWVw=
+  file: build/opentracing-cli
+  on:
+    repo: bsycorp/opentracing-cli
