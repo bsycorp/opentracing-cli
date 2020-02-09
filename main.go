@@ -18,6 +18,7 @@ type SpanState struct {
 	StartMillis time.Time
 	SpanID uint64
 	Context tracer.TextMapCarrier
+	ParentContext tracer.TextMapCarrier
 }
 
 func main() {
@@ -32,7 +33,7 @@ func main() {
 	if string(*actionPtr) == "start" {
 		start(string(*envPtr), string(*servicePtr), string(*operationPtr), string(*currentSpanStatePtr), string(*parentSpanStatePtr))
 	} else if string(*actionPtr) == "finish" {
-		finish(string(*currentSpanStatePtr), string(*parentSpanStatePtr))
+		finish(string(*currentSpanStatePtr))
 	} else {
 		fmt.Errorf("Unsupported action")
 	}
@@ -40,8 +41,22 @@ func main() {
 }
 
 func start(env string, service string, operation string, currentStateFilePath string, parentStateFilePath string) {
-	var parentSpanState *SpanState = nil
-	if(len(parentStateFilePath) > 0) {
+	tracer.Start(tracer.WithServiceName(service))
+
+	//dont love this but should be ok
+	rand.Seed(time.Now().UnixNano())
+	spanID := rand.Uint64()
+
+	var span ddtrace.Span = nil
+	var parentSpanContextCarrier tracer.TextMapCarrier = nil
+	if(len(parentStateFilePath) == 0) {
+		span = tracer.StartSpan(
+			operation,
+			tracer.WithSpanID(spanID),
+			tracer.Tag("Env", env),
+			tracer.StartTime(time.Now()))
+	} else {
+		var parentSpanState *SpanState = nil
 		parentContextJson, err := ioutil.ReadFile(parentStateFilePath)
 		if err != nil {
 			fmt.Println(err.Error())
@@ -53,22 +68,9 @@ func start(env string, service string, operation string, currentStateFilePath st
 			fmt.Println(err.Error())
 			return
 		}
-	}
 
-	tracer.Start(tracer.WithServiceName(service))
-
-	rand.Seed(time.Now().UnixNano())
-	spanID := rand.Uint64()
-
-	var span ddtrace.Span = nil
-	if(len(parentStateFilePath) == 0) {
-		span = tracer.StartSpan(
-			operation,
-			tracer.WithSpanID(spanID),
-			tracer.Tag("Env", env),
-			tracer.StartTime(time.Now()))
-	} else {
-		parentSpanContext, err := tracer.Extract(parentSpanState.Context)
+		parentSpanContextCarrier = parentSpanState.Context
+		parentSpanContext, err := tracer.Extract(parentSpanContextCarrier)
 		if err != nil {
 			fmt.Println(err.Error())
 			return
@@ -89,7 +91,7 @@ func start(env string, service string, operation string, currentStateFilePath st
 		fmt.Println(err.Error())
 		return
 	}
-	contextJson, err := json.Marshal(&SpanState{env, service, operation, time.Now(), spanID, carrier})
+	contextJson, err := json.Marshal(&SpanState{env, service, operation, time.Now(), spanID, carrier, parentSpanContextCarrier})
 	if err != nil {
 		fmt.Println(err.Error())
 		return
@@ -103,7 +105,7 @@ func start(env string, service string, operation string, currentStateFilePath st
 	fmt.Println(string(contextJson))
 }
 
-func finish(currentStateFilePath string, parentStateFilePath string) {
+func finish(currentStateFilePath string) {
 	currentContextJson, err := ioutil.ReadFile(currentStateFilePath)
 	if err != nil {
 		fmt.Println(err.Error())
@@ -121,7 +123,7 @@ func finish(currentStateFilePath string, parentStateFilePath string) {
 
 	var span ddtrace.Span = nil
 	//if we have a parent span then add it to span declaration, duplication here sucks but cbf optimising
-	if(len(parentStateFilePath) == 0) {
+	if(currentSpanState.ParentContext == nil) {
 		span = tracer.StartSpan(
 			currentSpanState.Operation,
 			tracer.WithSpanID(currentSpanState.SpanID),
@@ -129,20 +131,9 @@ func finish(currentStateFilePath string, parentStateFilePath string) {
 			tracer.StartTime(currentSpanState.StartMillis))
 
 		fmt.Printf("Finished span with id: %s", span.Context().SpanID())
-	} else {
-		parentContextJson, err := ioutil.ReadFile(parentStateFilePath)
-		if err != nil {
-			fmt.Println(err.Error())
-			return
-		}
-		parentSpanState := &SpanState{}
-		err = json.Unmarshal(parentContextJson, parentSpanState)
-		if err != nil {
-			fmt.Println(err.Error())
-			return
-		}
 
-		parentSpanContext, err := tracer.Extract(parentSpanState.Context)
+	} else {
+		parentSpanContext, err := tracer.Extract(currentSpanState.ParentContext)
 		if err != nil {
 			fmt.Println(err.Error())
 			return
