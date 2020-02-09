@@ -106,7 +106,7 @@ func start(env string, service string, resource string, operation string, curren
 		fmt.Println(err.Error())
 		return
 	}
-	fmt.Println(string(contextJson))
+	//fmt.Println(string(contextJson))
 }
 
 func finish(currentStateFilePath string) {
@@ -122,7 +122,7 @@ func finish(currentStateFilePath string) {
 		return
 	}
 
-	tracer.Start(tracer.WithServiceName(currentSpanState.Service))
+	tracer.Start(tracer.WithServiceName(currentSpanState.Service), tracer.WithEnv(currentSpanState.Env))
 	defer tracer.Stop()
 
 	var span ddtrace.Span = nil
@@ -132,10 +132,9 @@ func finish(currentStateFilePath string) {
 			currentSpanState.Operation,
 			tracer.WithSpanID(currentSpanState.SpanID),
 			tracer.ResourceName(currentSpanState.Resource),
-			tracer.Tag("Env", currentSpanState.Env),
 			tracer.StartTime(currentSpanState.StartMillis))
 
-		fmt.Printf("Finished span with id: %s", span.Context().SpanID())
+		//fmt.Printf("Finished span with id: %s", span.Context().SpanID())
 
 	} else {
 		parentSpanContext, err := tracer.Extract(currentSpanState.ParentContext)
@@ -149,9 +148,8 @@ func finish(currentStateFilePath string) {
 			tracer.ChildOf(parentSpanContext),
 			tracer.WithSpanID(currentSpanState.SpanID),
 			tracer.ResourceName(currentSpanState.Resource),
-			tracer.Tag("Env", currentSpanState.Env),
 			tracer.StartTime(currentSpanState.StartMillis))
-		fmt.Printf("Finished span with id: %s parent: %s", span.Context().SpanID(), parentSpanContext.SpanID())
+		//fmt.Printf("Finished span with id: %s parent: %s", span.Context().SpanID(), parentSpanContext.SpanID())
 	}
 
 	span.Finish()
