@@ -3,10 +3,10 @@ package main
 import (
 	"encoding/json"
 	"flag"
-	"fmt"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	"io/ioutil"
+	"log"
 	"math/rand"
 	"time"
 )
@@ -18,65 +18,82 @@ type SpanState struct {
 	Operation string
 	StartMillis time.Time
 	SpanID uint64
+	Tags map[string]string
 	Context tracer.TextMapCarrier
 	ParentContext tracer.TextMapCarrier
 }
 
 func main() {
 	actionPtr := flag.String("action", "", "'start' or 'finish'")
-	envPtr := flag.String("env", "", "The env name visible for the span")
-	servicePtr := flag.String("service", "", "The service name visible for the span")
-	resourcePtr := flag.String("resource", "", "The resource name visible for the span")
-	operationPtr := flag.String("operation", "", "The operation name visible for the span")
+	envPtr := flag.String("env", "unknown-env", "The env name visible for the span")
+	servicePtr := flag.String("service", "unknown-service", "The service name visible for the span")
+	resourcePtr := flag.String("resource", "unknown-resource", "The resource name visible for the span")
+	operationPtr := flag.String("operation", "unknown-operation", "The operation name visible for the span")
 	currentSpanStatePtr := flag.String("state", "", "The file path to store/retrieve the started span state")
 	parentSpanStatePtr := flag.String("parent", "", "The file path to store/retrieve the parent span state")
+	tagsJsonPtr := flag.String("tags", "{}", "The extra tags to add to the span, as JSON")
+	startTimeMillisPtr := flag.Int64("startMillis", -1, "The time the span started, default to time.Now()")
 	flag.Parse()
 
+	//default start time to now if omitted
+	startTime := time.Now()
+	if *startTimeMillisPtr > 0 {
+		startTime = time.Unix(0, *startTimeMillisPtr* int64(time.Millisecond))
+		log.Printf("overriding start time to %s", startTime)
+	}
+
 	if string(*actionPtr) == "start" {
-		start(string(*envPtr), string(*servicePtr), string(*resourcePtr), string(*operationPtr), string(*currentSpanStatePtr), string(*parentSpanStatePtr))
-	} else if string(*actionPtr) == "finish" {
-		finish(string(*currentSpanStatePtr))
+		start(startTime, *envPtr, *servicePtr, *resourcePtr, *operationPtr, *tagsJsonPtr, *currentSpanStatePtr, *parentSpanStatePtr)
+	} else if *actionPtr == "finish" {
+		finish(*currentSpanStatePtr)
 	} else {
-		fmt.Errorf("Unsupported action")
+		log.Fatal("unsupported action, should be 'start' or 'finish'")
 	}
 
 }
 
-func start(env string, service string, resource string, operation string, currentStateFilePath string, parentStateFilePath string) {
+func start(startTime time.Time, env string, service string, resource string, operation string, tagsJson string, currentStateFilePath string, parentStateFilePath string) {
+	if len(currentStateFilePath) == 0 {
+		log.Fatal("no state path found, set via -state")
+	}
+
 	tracer.Start(tracer.WithServiceName(service))
 
 	//dont love this but should be ok
-	rand.Seed(time.Now().UnixNano())
+	rand.Seed(startTime.UnixNano())
 	spanID := rand.Uint64()
+
+	tags := &map[string]string{}
+	err := json.Unmarshal([]byte(tagsJson), tags)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
 
 	var span ddtrace.Span = nil
 	var parentSpanContextCarrier tracer.TextMapCarrier = nil
-	if(len(parentStateFilePath) == 0) {
+	if len(parentStateFilePath) == 0 {
 		span = tracer.StartSpan(
 			operation,
 			tracer.WithSpanID(spanID),
 			tracer.ResourceName(resource),
 			tracer.Tag("Env", env),
-			tracer.StartTime(time.Now()))
+			tracer.StartTime(startTime))
 	} else {
 		var parentSpanState *SpanState = nil
 		parentContextJson, err := ioutil.ReadFile(parentStateFilePath)
 		if err != nil {
-			fmt.Println(err.Error())
-			return
+			log.Fatal(err.Error())
 		}
 		parentSpanState = &SpanState{}
 		err = json.Unmarshal(parentContextJson, parentSpanState)
 		if err != nil {
-			fmt.Println(err.Error())
-			return
+			log.Fatal(err.Error())
 		}
 
 		parentSpanContextCarrier = parentSpanState.Context
 		parentSpanContext, err := tracer.Extract(parentSpanContextCarrier)
 		if err != nil {
-			fmt.Println(err.Error())
-			return
+			log.Fatal(err.Error())
 		}
 
 		span = tracer.StartSpan(
@@ -85,26 +102,23 @@ func start(env string, service string, resource string, operation string, curren
 			tracer.WithSpanID(spanID),
 			tracer.ResourceName(resource),
 			tracer.Tag("Env", env),
-			tracer.StartTime(time.Now()))
+			tracer.StartTime(startTime))
 	}
 
 	//serialise span to file
 	carrier := tracer.TextMapCarrier{}
-	err := tracer.Inject(span.Context(), carrier)
+	err = tracer.Inject(span.Context(), carrier)
 	if err != nil {
-		fmt.Println(err.Error())
-		return
+		log.Fatal(err.Error())
 	}
-	contextJson, err := json.Marshal(&SpanState{env, service, resource, operation, time.Now(), spanID, carrier, parentSpanContextCarrier})
+	contextJson, err := json.Marshal(&SpanState{env, service, resource, operation, startTime, spanID,*tags, carrier, parentSpanContextCarrier})
 	if err != nil {
-		fmt.Println(err.Error())
-		return
+		log.Fatal(err.Error())
 	}
 	//fmt.Printf("Writing span state to '%s'", currentStateFilePath)
 	err = ioutil.WriteFile(currentStateFilePath, contextJson, 0644)
 	if err != nil {
-		fmt.Println(err.Error())
-		return
+		log.Fatal(err.Error())
 	}
 	//fmt.Println(string(contextJson))
 }
@@ -112,22 +126,26 @@ func start(env string, service string, resource string, operation string, curren
 func finish(currentStateFilePath string) {
 	currentContextJson, err := ioutil.ReadFile(currentStateFilePath)
 	if err != nil {
-		fmt.Println(err.Error())
-		return
+		log.Fatal(err.Error())
 	}
+
 	currentSpanState := &SpanState{}
 	err = json.Unmarshal(currentContextJson, currentSpanState)
 	if err != nil {
-		fmt.Println(err.Error())
-		return
+		log.Fatal(err.Error())
 	}
 
-	tracer.Start(tracer.WithServiceName(currentSpanState.Service), tracer.WithEnv(currentSpanState.Env))
+	//start tracer, add global tags if found
+	startOptions := []tracer.StartOption { tracer.WithServiceName(currentSpanState.Service), tracer.WithEnv(currentSpanState.Env) }
+	for k, v := range currentSpanState.Tags {
+		startOptions = append(startOptions, tracer.WithGlobalTag(k, v))
+	}
+	tracer.Start(startOptions...)
 	defer tracer.Stop()
 
 	var span ddtrace.Span = nil
 	//if we have a parent span then add it to span declaration, duplication here sucks but cbf optimising
-	if(currentSpanState.ParentContext == nil) {
+	if currentSpanState.ParentContext == nil {
 		span = tracer.StartSpan(
 			currentSpanState.Operation,
 			tracer.WithSpanID(currentSpanState.SpanID),
@@ -139,8 +157,7 @@ func finish(currentStateFilePath string) {
 	} else {
 		parentSpanContext, err := tracer.Extract(currentSpanState.ParentContext)
 		if err != nil {
-			fmt.Println(err.Error())
-			return
+			log.Fatal(err.Error())
 		}
 
 		span = tracer.StartSpan(
