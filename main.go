@@ -32,20 +32,29 @@ func main() {
 	currentSpanStatePtr := flag.String("state", "", "The file path to store/retrieve the started span state")
 	parentSpanStatePtr := flag.String("parent", "", "The file path to store/retrieve the parent span state")
 	tagsJsonPtr := flag.String("tags", "{}", "The extra tags to add to the span, as JSON")
-	startTimeMillisPtr := flag.Int64("startMillis", -1, "The time the span started, default to time.Now()")
+	epochTimeMillisPtr := flag.Int64("epoch-time", -1, "The time the span started / finished, default to time.Now()")
+	isoTimeMillisPtr := flag.String("iso-time", "", "The time the span started / finished, default to time.Now()")
 	flag.Parse()
 
 	//default start time to now if omitted
-	startTime := time.Now()
-	if *startTimeMillisPtr > 0 {
-		startTime = time.Unix(0, *startTimeMillisPtr* int64(time.Millisecond))
-		log.Printf("overriding start time to %s", startTime)
+	var err error = nil
+	actionTime := time.Now()
+	if *epochTimeMillisPtr > 0 {
+		actionTime = time.Unix(0, *epochTimeMillisPtr* int64(time.Millisecond))
+		log.Printf("overriding action time to %s", actionTime)
+	}
+	if len(*isoTimeMillisPtr) > 0 {
+		actionTime, err = time.Parse(time.RFC3339, *isoTimeMillisPtr)
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+		log.Printf("overriding action time to %s", actionTime)
 	}
 
 	if string(*actionPtr) == "start" {
-		start(startTime, *envPtr, *servicePtr, *resourcePtr, *operationPtr, *tagsJsonPtr, *currentSpanStatePtr, *parentSpanStatePtr)
+		start(actionTime, *envPtr, *servicePtr, *resourcePtr, *operationPtr, *tagsJsonPtr, *currentSpanStatePtr, *parentSpanStatePtr)
 	} else if *actionPtr == "finish" {
-		finish(*currentSpanStatePtr)
+		finish(actionTime, *currentSpanStatePtr)
 	} else {
 		log.Fatal("unsupported action, should be 'start' or 'finish'")
 	}
@@ -123,7 +132,7 @@ func start(startTime time.Time, env string, service string, resource string, ope
 	//fmt.Println(string(contextJson))
 }
 
-func finish(currentStateFilePath string) {
+func finish(finishTime time.Time, currentStateFilePath string) {
 	currentContextJson, err := ioutil.ReadFile(currentStateFilePath)
 	if err != nil {
 		log.Fatal(err.Error())
@@ -169,5 +178,5 @@ func finish(currentStateFilePath string) {
 		//fmt.Printf("Finished span with id: %s parent: %s", span.Context().SpanID(), parentSpanContext.SpanID())
 	}
 
-	span.Finish()
+	span.Finish(tracer.FinishTime(finishTime))
 }
